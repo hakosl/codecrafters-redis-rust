@@ -31,7 +31,7 @@ async fn process_request(mut stream: TcpStream) {
         let lines: Vec<&str> = s.split("\r\n").collect();
         let n_lines = lines[0];
 
-        if lines[2] == "ECHO" {
+        if lines[2].to_uppercase() == "ECHO" {
             stream
                 .write_all((format!("+ECHO {}\r\n", lines[4])).as_bytes())
                 .await
@@ -57,15 +57,29 @@ fn parse_message(input: &str) -> Message {
             content: String::new(),
         }
     } else {
-        let n_commands: i32 = str::parse(&String::from(lines[0])[1..]).unwrap();
-        let command_len: i32 = str::parse(&String::from(lines[1])[1..]).unwrap();
-        let command = lines[2];
-        let content_len: i32 = str::parse(&String::from(lines[3])[1..]).unwrap();
-        let content = lines[4];
+        let n_commands: usize = str::parse(&String::from(lines[0])[1..]).unwrap();
+        println!("n_commands: {n_commands}");
+        let mut array_sizes: Vec<i32> = vec![0; n_commands]; 
 
+
+        for i in 0..n_commands {
+            array_sizes[i] = str::parse(&lines[i * 2 + 1][1..]).unwrap(); 
+        }
+
+        let mut content: Vec<String> = vec![String::new(); n_commands];
+
+        for i in 0..n_commands {
+            content[i] = lines[(i + 1) * 2].to_string();
+        }
+        if n_commands == 1 {
+            return Message {
+                command: content[0].to_owned(),
+                content: String::new(), 
+            };
+        }
         Message {
-            command: command.to_owned(),
-            content: content.to_owned(),
+            command: content[0].to_owned(),
+            content: content[1].to_owned(),
         }
     }
 }
