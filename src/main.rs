@@ -31,6 +31,7 @@ async fn process_request(mut stream: TcpStream) {
         let lines: Vec<&str> = s.split("\r\n").collect();
         let n_lines = lines[0];
 
+        
         if lines[2].to_uppercase() == "ECHO" {
             stream
                 .write_all((format!("+ECHO {}\r\n", lines[4])).as_bytes())
