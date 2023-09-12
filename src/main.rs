@@ -34,7 +34,7 @@ async fn process_request(mut stream: TcpStream) {
 
         if lines[2].to_uppercase() == "ECHO" {
             stream
-                .write_all((format!("+ECHO {}\r\n", lines[4])).as_bytes())
+                .write_all((format!("+{}\r\n", lines[4])).as_bytes())
                 .await
                 .unwrap();
         } else {
