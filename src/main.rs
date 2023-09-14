@@ -1,6 +1,10 @@
 use std::io;
 
+use anyhow::Error;
+use anyhow::Result;
+use std::collections::HashMap;
 use std::str;
+use std::sync::{Arc, Mutex};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -11,13 +15,15 @@ async fn main() -> io::Result<()> {
     println!("Logs from your program will appear here!");
 
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    let state = Arc::new(Mutex::new(HashMap::new()));
     loop {
         let (socket, _) = listener.accept().await?;
-        tokio::spawn(async move { process_request(socket).await });
+        let local_state = state.clone();
+        tokio::spawn(async move { process_request(socket, local_state).await });
     }
 }
 
-async fn process_request(mut stream: TcpStream) {
+async fn process_request(mut stream: TcpStream, state: Arc<Mutex<HashMap<String, String>>>) {
     loop {
         let mut buffer = [0; 512];
         let read_bytes = stream.read(&mut buffer).await.unwrap();
@@ -26,65 +32,69 @@ async fn process_request(mut stream: TcpStream) {
         }
         let s = str::from_utf8(&buffer).unwrap();
         println!("{s}");
-        let message = parse_message(s);
-        println!("{s}");
         let lines: Vec<&str> = s.split("\r\n").collect();
-        let n_lines = lines[0];
+        let command = lines[2].to_uppercase();
 
-
-        if lines[2].to_uppercase() == "ECHO" {
-            stream
-                .write_all((format!("+{}\r\n", lines[4])).as_bytes())
-                .await
-                .unwrap();
-        } else {
-            stream.write_all(b"+PONG\r\n").await.unwrap();
-        }
+        match command.as_str() {
+            "ECHO" => {
+                stream
+                    .write_all((format!("+{}\r\n", lines[4])).as_bytes())
+                    .await
+                    .unwrap();
+            }
+            "SET" => {
+                let key = lines[4].clone().to_string();
+                let value = lines[6].clone().to_string();
+                set_value(state.clone(), key, value).unwrap();
+                stream.write_all(b"+OK\r\n").await.unwrap();
+            }
+            "GET" => {
+                println!("getting");
+                let key = lines[4].clone().to_string();
+                println!("getting {key}");
+                let response = get_value(state.clone(), key);
+                match response {
+                    Ok(resp) => {
+                        println!("{}", str::from_utf8(&resp).unwrap());
+                        stream.write_all(&resp).await.unwrap();
+                    }
+                    Err(err) => {
+                        println!("{}", str::from_utf8(err.as_bytes()).unwrap());
+                        stream.write_all(b"-Not found\r\n").await.unwrap();
+                    }
+                };
+                // println!("{}", str::from_utf8(val.clone()).unwrap());
+            }
+            _ => {
+                stream.write_all(b"+PONG\r\n").await.unwrap();
+            }
+        };
+        println!("outside");
         stream.flush().await.unwrap();
         println!("read: {read_bytes}, {s}");
     }
 }
 
-struct Message {
-    command: String,
-    content: String,
+fn set_value(
+    state: Arc<Mutex<HashMap<String, String>>>,
+    key: String,
+    value: String,
+) -> Result<&'static [u8; 2]> {
+    let mut locked_state = state.lock().unwrap();
+
+    locked_state.insert(key, value);
+
+    Ok(b"OK")
 }
 
-fn parse_message(input: &str) -> Message {
-    let lines: Vec<&str> = input.split("\r\n").collect();
-    if lines.len() == 1 {
-        Message {
-            command: String::from(lines[0]),
-            content: String::new(),
-        }
-    } else {
-        let n_commands: usize = str::parse(&String::from(lines[0])[1..]).unwrap();
-        println!("n_commands: {n_commands}");
-        let mut array_sizes: Vec<i32> = vec![0; n_commands]; 
+fn get_value(state: Arc<Mutex<HashMap<String, String>>>, key: String) -> Result<Vec<u8>, String> {
+    let locked_state = state.lock().unwrap();
 
-
-        for i in 0..n_commands {
-            let line = &lines[i * 2 + 1][1..];
-            println!("n_commands: {line}");
-            array_sizes[i] = str::parse(line).unwrap(); 
+    match locked_state.get(&key) {
+        Some(val) => {
+            let value = val.clone();
+            Ok(("+".to_owned() + &value + "\r\n").into_bytes())
         }
-
-        let mut content: Vec<String> = vec![String::new(); n_commands];
-
-        for i in 0..n_commands {
-            let line = lines[(i + 1) * 2];
-            println!("commands: {line}");
-            content[i] = line.to_string();
-        }
-        if n_commands == 1 {
-            return Message {
-                command: content[0].to_owned(),
-                content: String::new(), 
-            };
-        }
-        Message {
-            command: content[0].to_owned(),
-            content: content[1].to_owned(),
-        }
+        None => Err("-Not found".to_string()),
     }
 }
